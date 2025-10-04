@@ -40,6 +40,8 @@
 #include "gld_dxerr9.h"
 #include "gldirect5.h"
 
+#include <math.h>
+
 // Copied from gld_context.c
 #define GLDERR_NONE     0
 #define GLDERR_MEM      1
@@ -138,6 +140,68 @@ typedef struct {
 
 // These are "global" to all DX9 contexts. KeithH
 static GLD_dx9_globals dx9Globals;
+
+static UINT gldChoosePresentationInterval(const D3DCAPS9 *caps)
+{
+        UINT interval = D3DPRESENT_INTERVAL_DEFAULT;
+
+        if (glb.bSwapIntervalOverride) {
+                if (glb.uSwapInterval == 0) {
+                        if (caps->PresentationIntervals & D3DPRESENT_INTERVAL_IMMEDIATE)
+                                return D3DPRESENT_INTERVAL_IMMEDIATE;
+                } else {
+                        if (caps->PresentationIntervals & D3DPRESENT_INTERVAL_ONE)
+                                return D3DPRESENT_INTERVAL_ONE;
+                }
+        }
+
+        if (glb.bWaitForRetrace) {
+                if (caps->PresentationIntervals & D3DPRESENT_INTERVAL_ONE)
+                        interval = D3DPRESENT_INTERVAL_ONE;
+        } else {
+                if (caps->PresentationIntervals & D3DPRESENT_INTERVAL_IMMEDIATE)
+                        interval = D3DPRESENT_INTERVAL_IMMEDIATE;
+        }
+
+        return interval;
+}
+
+static D3DFORMAT gldPreferMiniGLFormat(IDirect3D9 *pD3D, UINT adapter, D3DDEVTYPE devType, D3DFORMAT adapterFormat, BOOL windowed)
+{
+        static const D3DFORMAT preferred[] = { D3DFMT_R5G6B5, D3DFMT_X1R5G5B5 };
+        UINT i;
+
+        for (i = 0; i < sizeof(preferred)/sizeof(preferred[0]); ++i) {
+                if (SUCCEEDED(IDirect3D9_CheckDeviceType(pD3D, adapter, devType, adapterFormat, preferred[i], windowed)))
+                        return preferred[i];
+        }
+
+        return adapterFormat;
+}
+
+static void gldApplyGammaFromEnv(GLD_driver_dx9 *gld)
+{
+        if (!glb.bEnvGammaValid || gld == NULL || gld->pDev == NULL)
+                return;
+
+        if (glb.fEnvGamma <= 0.0f)
+                return;
+
+        D3DGAMMARAMP ramp;
+        double invGamma = 1.0 / glb.fEnvGamma;
+        int i;
+
+        for (i = 0; i < 256; ++i) {
+                double value = pow((double)i / 255.0, invGamma);
+                if (value < 0.0)
+                        value = 0.0;
+                if (value > 1.0)
+                        value = 1.0;
+                ramp.red[i] = ramp.green[i] = ramp.blue[i] = (WORD)(value * 65535.0 + 0.5);
+        }
+
+        IDirect3DDevice9_SetGammaRamp(gld->pDev, 0, D3DSGR_NO_CALIBRATION, &ramp);
+}
 
 //---------------------------------------------------------------------------
 //---------------------------------------------------------------------------
@@ -334,6 +398,7 @@ BOOL gldCreateDrawable_DX(
 	D3DDEVTYPE				d3dDevType;
 	D3DPRESENT_PARAMETERS	d3dpp;
 	D3DDISPLAYMODE			d3ddm;
+	D3DFORMAT			renderFormat;
 	DWORD					dwBehaviourFlags;
 	D3DADAPTER_IDENTIFIER9	d3dIdent;
 	UINT					uiDriverLevel;
@@ -388,6 +453,10 @@ SkipDirectDrawCreate:
 		goto return_with_error;
 	}
 
+	// Prefer MiniGL-style 16-bit render targets when possible
+	renderFormat = gldPreferMiniGLFormat(lpCtx->pD3D, glb.dwAdapter, d3dDevType, d3ddm.Format, !ctx->bFullscreen);
+	lpCtx->RenderFormat = renderFormat;
+
 	// Check if fullscreen window for page-flipping option. (DaveM)
 	if (!glb.bFullscreenBlit) {
 		RECT r;
@@ -428,9 +497,9 @@ SkipDirectDrawCreate:
 	// Be careful if altering this for FullScreenBlit
 	d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
 
-	d3dpp.BackBufferFormat	= d3ddm.Format;
+	d3dpp.BackBufferFormat	= renderFormat;
 	d3dpp.BackBufferCount	= (!glb.bWaitForRetrace) ? 2 : 1;
-	d3dpp.MultiSampleType	= _gldGetDeviceMultiSampleType(lpCtx->pD3D, d3ddm.Format, d3dDevType, !ctx->bFullscreen);
+	d3dpp.MultiSampleType	= _gldGetDeviceMultiSampleType(lpCtx->pD3D, renderFormat, d3dDevType, !ctx->bFullscreen);
 	d3dpp.AutoDepthStencilFormat	= (D3DFORMAT)ctx->lpPF->dwDriverData;
 	d3dpp.EnableAutoDepthStencil	= (d3dpp.AutoDepthStencilFormat == D3DFMT_UNKNOWN) ? FALSE : TRUE;
 
@@ -442,15 +511,7 @@ SkipDirectDrawCreate:
 		d3dpp.hDeviceWindow						= ctx->hWnd;
 		d3dpp.FullScreen_RefreshRateInHz		= D3DPRESENT_RATE_DEFAULT;
 		// Support for vertical retrace synchronisation.
-		// Set default presentation interval in case caps bits are missing
-		d3dpp.PresentationInterval	= D3DPRESENT_INTERVAL_DEFAULT;
-		if (glb.bWaitForRetrace) {
-			if (lpCtx->d3dCaps9.PresentationIntervals & D3DPRESENT_INTERVAL_ONE)
-				d3dpp.PresentationInterval = D3DPRESENT_INTERVAL_ONE;
-		} else {
-			if (lpCtx->d3dCaps9.PresentationIntervals & D3DPRESENT_INTERVAL_IMMEDIATE)
-				d3dpp.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
-		}
+		d3dpp.PresentationInterval = gldChoosePresentationInterval(&lpCtx->d3dCaps9);
 		// Fullscreen blit option. (DaveM)
 		if ((glb.bFullscreenBlit || ctx->EmulateSingle) &&
 			d3dpp.MultiSampleType == D3DMULTISAMPLE_NONE) {
@@ -465,14 +526,7 @@ SkipDirectDrawCreate:
 		d3dpp.hDeviceWindow						= ctx->hWnd;
 		d3dpp.FullScreen_RefreshRateInHz		= 0;
 		// PresentationInterval Windowed mode is optional now in DX9 (DaveM)
-		d3dpp.PresentationInterval	= D3DPRESENT_INTERVAL_DEFAULT;
-		if (glb.bWaitForRetrace) {
-			if (lpCtx->d3dCaps9.PresentationIntervals & D3DPRESENT_INTERVAL_ONE)
-				d3dpp.PresentationInterval = D3DPRESENT_INTERVAL_ONE;
-		} else {
-			if (lpCtx->d3dCaps9.PresentationIntervals & D3DPRESENT_INTERVAL_IMMEDIATE)
-				d3dpp.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
-		}
+		d3dpp.PresentationInterval = gldChoosePresentationInterval(&lpCtx->d3dCaps9);
 		// Emulated front buffering option. (DaveM)
 		if (ctx->EmulateSingle &&
 			d3dpp.MultiSampleType == D3DMULTISAMPLE_NONE) {
@@ -508,6 +562,9 @@ SkipDirectDrawCreate:
         nContextError = GLDERR_D3D;
 		goto return_with_error;
 	}
+
+	lpCtx->PresentParams = d3dpp;
+	gldApplyGammaFromEnv(lpCtx);
 
 	if (bDirectDrawPersistant && bPersistantBuffers && dx9Globals.pD3D) {
 		dx9Globals.pDev = lpCtx->pDev;
@@ -585,6 +642,7 @@ BOOL gldResizeDrawable_DX(
 	D3DDEVTYPE				d3dDevType;
 	D3DPRESENT_PARAMETERS	d3dpp;
 	D3DDISPLAYMODE			d3ddm;
+	D3DFORMAT			renderFormat;
 	HRESULT					hResult;
 	int						i;
 
@@ -622,6 +680,9 @@ BOOL gldResizeDrawable_DX(
 		return FALSE;
 	}
 
+	renderFormat = gldPreferMiniGLFormat(gld->pD3D, glb.dwAdapter, d3dDevType, d3ddm.Format, !ctx->bFullscreen);
+	gld->RenderFormat = renderFormat;
+
 	// Release POOL_DEFAULT objects before Reset()
 	_gldDestroyPrimitiveBuffer(gld);
 
@@ -637,9 +698,9 @@ BOOL gldResizeDrawable_DX(
 	// Be careful if altering this for FullScreenBlit
 	d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
 
-	d3dpp.BackBufferFormat	= d3ddm.Format;
+	d3dpp.BackBufferFormat	= renderFormat;
 	d3dpp.BackBufferCount	= (!glb.bWaitForRetrace) ? 2 : 1;
-	d3dpp.MultiSampleType	= _gldGetDeviceMultiSampleType(gld->pD3D, d3ddm.Format, d3dDevType, !ctx->bFullscreen);
+	d3dpp.MultiSampleType	= _gldGetDeviceMultiSampleType(gld->pD3D, renderFormat, d3dDevType, !ctx->bFullscreen);
 	d3dpp.AutoDepthStencilFormat	= (D3DFORMAT)ctx->lpPF->dwDriverData;
 	d3dpp.EnableAutoDepthStencil	= (d3dpp.AutoDepthStencilFormat == D3DFMT_UNKNOWN) ? FALSE : TRUE;
 
@@ -657,14 +718,7 @@ BOOL gldResizeDrawable_DX(
 //		d3dpp.FullScreen_RefreshRateInHz	= D3DPRESENT_RATE_UNLIMITED;
 		// Support for vertical retrace synchronisation.
 		// Set default presentation interval in case caps bits are missing
-		d3dpp.PresentationInterval	= D3DPRESENT_INTERVAL_DEFAULT;
-		if (glb.bWaitForRetrace) {
-			if (gld->d3dCaps9.PresentationIntervals & D3DPRESENT_INTERVAL_ONE)
-				d3dpp.PresentationInterval = D3DPRESENT_INTERVAL_ONE;
-		} else {
-			if (gld->d3dCaps9.PresentationIntervals & D3DPRESENT_INTERVAL_IMMEDIATE)
-				d3dpp.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
-		}
+		d3dpp.PresentationInterval	= gldChoosePresentationInterval(&gld->d3dCaps9);
 		// Fullscreen blit option. (DaveM)
 		if ((glb.bFullscreenBlit || ctx->EmulateSingle) &&
 			d3dpp.MultiSampleType == D3DMULTISAMPLE_NONE) {
@@ -680,14 +734,7 @@ BOOL gldResizeDrawable_DX(
 		d3dpp.FullScreen_RefreshRateInHz	= 0;
 		d3dpp.PresentationInterval			= D3DPRESENT_INTERVAL_DEFAULT;
 		// PresentationInterval Windowed mode is optional now in DX9 (DaveM)
-		d3dpp.PresentationInterval	= D3DPRESENT_INTERVAL_DEFAULT;
-		if (glb.bWaitForRetrace) {
-			if (gld->d3dCaps9.PresentationIntervals & D3DPRESENT_INTERVAL_ONE)
-				d3dpp.PresentationInterval = D3DPRESENT_INTERVAL_ONE;
-		} else {
-			if (gld->d3dCaps9.PresentationIntervals & D3DPRESENT_INTERVAL_IMMEDIATE)
-				d3dpp.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
-		}
+		d3dpp.PresentationInterval	= gldChoosePresentationInterval(&gld->d3dCaps9);
 		// Emulated front buffering option. (DaveM)
 		if (ctx->EmulateSingle &&
 			d3dpp.MultiSampleType == D3DMULTISAMPLE_NONE) {
@@ -704,6 +751,9 @@ BOOL gldResizeDrawable_DX(
 		return FALSE;
 		//goto cleanup_and_return_with_error;
 	}
+
+	gld->PresentParams = d3dpp;
+	gldApplyGammaFromEnv(gld);
 
     // Explicitly Clear resized surfaces (DaveM)
 	{
@@ -871,20 +921,15 @@ static void _BitsFromDisplayFormat(
 		*cBlueBits = 5;
 		*cAlphaBits = 0;
 		return;
-	case D3DFMT_X8R8G8B8:
-		*cColorBits = 32;
-		*cRedBits = 8;
-		*cGreenBits = 8;
-		*cBlueBits = 8;
-		*cAlphaBits = 0;
-		return;
-	case D3DFMT_A8R8G8B8:
-		*cColorBits = 32;
-		*cRedBits = 8;
-		*cGreenBits = 8;
-		*cBlueBits = 8;
-		*cAlphaBits = 8;
-		return;
+        case D3DFMT_X8R8G8B8:
+        case D3DFMT_A8R8G8B8:
+                // Force advertised colour precision to 16-bit to match MiniGL expectations
+                *cColorBits = 16;
+                *cRedBits = 5;
+                *cGreenBits = 6;
+                *cBlueBits = 5;
+                *cAlphaBits = (fmt == D3DFMT_A8R8G8B8) ? 1 : 0;
+                return;
 	}
 
 	// Should not get here!
@@ -936,7 +981,7 @@ static void _BitsFromDepthStencilFormat(
 BOOL gldBuildPixelformatList_DX(void)
 {
 	D3DDISPLAYMODE		d3ddm;
-	D3DFORMAT			fmt[6];
+	D3DFORMAT			fmt[2];
 	IDirect3D9			*pD3D = NULL;
 	HRESULT				hr;
 	int					nSupportedFormats = 0;
@@ -948,15 +993,10 @@ BOOL gldBuildPixelformatList_DX(void)
 	// Direct3D (SW or HW)
 	// These are arranged so that 'best' pixelformat
 	// is higher in the list (for ChoosePixelFormat).
-	const D3DFORMAT DepthStencil[6] = {
-// New order: increaing Z, then increasing stencil
-		D3DFMT_D15S1,
-		D3DFMT_D16,
-		D3DFMT_D24X4S4,
-		D3DFMT_D24X8,
-		D3DFMT_D24S8,
-		D3DFMT_D32,
-	};
+        const D3DFORMAT DepthStencil[2] = {
+                D3DFMT_D16,
+                D3DFMT_D15S1,
+        };
 
 	// Release any existing pixelformat list
 	if (glb.lpPF) {
@@ -997,8 +1037,11 @@ BOOL gldBuildPixelformatList_DX(void)
 		return FALSE;
 	}
 	
+	// Prefer 16-bit colour formats to mirror the Half-Life Alpha MiniGL path
+	d3ddm.Format = gldPreferMiniGLFormat(pD3D, glb.dwAdapter, d3dDevType, d3ddm.Format, TRUE);
+	
 	// Run through the possible formats and detect supported formats
-	for (i=0; i<6; i++) {
+        for (i=0; i<sizeof(DepthStencil)/sizeof(DepthStencil[0]); i++) {
 		hr = IDirect3D9_CheckDeviceFormat(
 			pD3D,
 			glb.dwAdapter,
@@ -1100,6 +1143,31 @@ BOOL gldBuildPixelformatList_DX(void)
 	return TRUE;
 }
 
+BOOL WINAPI wglSwapIntervalEXT(int interval)
+{
+	GLD_ctx *ctx;
+
+	if (interval < 0)
+		interval = 0;
+
+	glb.bSwapIntervalOverride = TRUE;
+	glb.uSwapInterval = (UINT)interval;
+	glb.bWaitForRetrace = (interval != 0);
+
+	ctx = gldGetContextAddress(gldGetCurrentContext());
+	if (!ctx)
+		return FALSE;
+
+	return _gldDriver.ResizeDrawable(ctx, TRUE, glb.bDirectDrawPersistant, glb.bPersistantBuffers);
+}
+
+int WINAPI wglGetSwapIntervalEXT(void)
+{
+	if (glb.bSwapIntervalOverride)
+		return (int)glb.uSwapInterval;
+	return glb.bWaitForRetrace ? 1 : 0;
+}
+
 //---------------------------------------------------------------------------
 
 BOOL gldInitialiseMesa_DX(
@@ -1137,6 +1205,8 @@ BOOL gldInitialiseMesa_DX(
 	// Clamp texture size to Mesa limits
 	if (MaxTextureSize > __min(MAX_WIDTH, MAX_HEIGHT))
 		MaxTextureSize = __min(MAX_WIDTH, MAX_HEIGHT);
+	if (MaxTextureSize > 256)
+		MaxTextureSize = 256;
 
 	// Got to set MAX_TEXTURE_SIZE as max levels.
 	// Who thought this stupid idea up? ;)

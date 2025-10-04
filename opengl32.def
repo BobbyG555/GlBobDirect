@@ -451,6 +451,8 @@ EXPORTS
  GetPixelFormat = wglGetPixelFormat
  SetPixelFormat = wglSetPixelFormat 
  SwapBuffers = wglSwapBuffers
+ wglSwapIntervalEXT
+ wglGetSwapIntervalEXT
 
  wglChoosePixelFormat
  wglDescribePixelFormat

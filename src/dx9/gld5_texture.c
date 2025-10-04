@@ -648,7 +648,7 @@ const struct gl_texture_format* _gldMesaFormatForD3DFormat(
 {
 	switch (d3dfmt) {
 	case D3DFMT_A8R8G8B8:
-		return &_mesa_texformat_argb8888;
+		return &_mesa_texformat_argb4444;
 	case D3DFMT_R8G8B8:
 		return &_mesa_texformat_rgb888;
 	case D3DFMT_R5G6B5:
@@ -972,7 +972,7 @@ void gld_DrawPixels_DX9(
 		ctx,
 		2,
 		GL_RGBA,
-		&_mesa_texformat_argb8888,
+		&_mesa_texformat_argb4444,
 		d3dLockedRect.pBits,
 		width, height, 1, 0, 0, 0,
 		d3dLockedRect.Pitch,
@@ -1334,7 +1334,7 @@ void gld_Bitmap_DX9(
 		ctx,
 		2,
 		GL_BITMAP,
-		&_mesa_texformat_argb8888,
+		&_mesa_texformat_argb4444,
 		d3dLockedRect.pBits,
 		width, height, 1, 0, 0, 0,
 		d3dLockedRect.Pitch,
@@ -1474,7 +1474,7 @@ const struct gl_texture_format* gld_ChooseTextureFormat_DX9(
 	case GL_RGB10_A2:
 	case GL_RGBA12:
 	case GL_RGBA16:
-		return &_mesa_texformat_argb8888;
+		return &_mesa_texformat_argb4444;
 	case GL_RGB5_A1:
 		return &_mesa_texformat_argb1555;
 	default:
@@ -1536,7 +1536,7 @@ void gld_TexImage2D_DX9(
 	}
 	// unpack image, apply transfer ops and store in tempImage
 	_mesa_transfer_teximage(ctx, 2, texImage->Format,
-		&_mesa_texformat_argb8888, // dest format
+		&_mesa_texformat_argb4444, // dest format
 		tempImage,
 		width, height, 1, 0, 0, 0,
 		width * texelBytes,
@@ -1586,7 +1586,7 @@ static void gldTexImage2DScaled(
 	}
 	// unpack image, apply transfer ops and store in tempImage
 	_mesa_transfer_teximage(ctx, 2, texImage->Format,
-		&_mesa_texformat_argb8888, // dest format
+		&_mesa_texformat_argb4444, // dest format
 		tempImage,
 		width, height, 1, 0, 0, 0,
 		width * texelBytes,
@@ -1758,7 +1758,7 @@ void gld_TexSubImage2D_DX9( GLcontext *ctx, GLenum target, GLint level,
 
 	// unpack image, apply transfer ops and store in tempImage
 	_mesa_transfer_teximage(ctx, 2, texImage->Format,
-		&_mesa_texformat_argb8888, // dest format
+		&_mesa_texformat_argb4444, // dest format
 		tempImage,
 		width, height, 1, 0, 0, 0,
 		width * texelBytes,
@@ -1818,7 +1818,7 @@ static void gldTexSubImage2DScaled(
 	}
 	// unpack image, apply transfer ops and store in tempImage
 	_mesa_transfer_teximage(ctx, 2, texImage->Format,
-		&_mesa_texformat_argb8888, // dest format
+		&_mesa_texformat_argb4444, // dest format
 		tempImage,
 		width, height, 1, 0, 0, 0,
 		width * texelBytes,
