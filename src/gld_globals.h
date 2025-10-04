@@ -163,6 +163,12 @@ typedef struct {
 	void				*pDrvPrivate;			// Driver-specific data
 
 	int					iAppCustomisation;		// Index of AppCust detected.
+
+	// MiniGL-style overrides
+	BOOL				bSwapIntervalOverride;		// TRUE when swap interval forced via env/WGL
+	UINT				uSwapInterval;		// Requested swap interval value
+	BOOL				bEnvGammaValid;		// TRUE when gamma override supplied
+	float				fEnvGamma;		// Requested gamma value
 } GLD_globals;
 
 /*------------------------- Function Prototypes ---------------------------*/

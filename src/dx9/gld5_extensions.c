@@ -147,7 +147,9 @@ GLD_extension GLD_extList[] = {
 
     {	(PROC)glLockArraysEXT,			"glLockArraysEXT"			},
     {	(PROC)glUnlockArraysEXT,		"glUnlockArraysEXT"			},
-	{	NULL,							"\0"						}
+    {   (PROC)wglSwapIntervalEXT,			"wglSwapIntervalEXT"			},
+    {   (PROC)wglGetSwapIntervalEXT,			"wglGetSwapIntervalEXT"		},
+    {       NULL,							"\0"						}
 };
 
 GLD_extension GLD_multitexList[] = {
@@ -231,7 +233,7 @@ GLD_extension GLD_multitexList[] = {
     {	(PROC)gldMTexCoord2fSGIS,		"glMTexCoord2fSGIS"			},
     {	(PROC)gldMTexCoord2fvSGIS,		"glMTexCoord2fvSGIS"		},
 
-	{	NULL,							"\0"						}
+    {       NULL,							"\0"						}
 };
 
 //---------------------------------------------------------------------------

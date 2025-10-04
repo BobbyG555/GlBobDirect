@@ -39,6 +39,8 @@
 
 #include "gld_driver.h"
 
+#include <stdlib.h>
+
 #include "mmsystem.h"
 
 // ***********************************************************************
@@ -109,6 +111,34 @@ typedef struct {
 } INI_settings;
 
 static INI_settings ini;
+
+static void gldApplyEnvironmentOverrides(void)
+{
+    const char *env;
+
+    env = getenv("SST_GAMMA");
+    if (!env || !*env)
+        env = getenv("GLDIRECT_GAMMA");
+    if (env && *env) {
+        double gamma = atof(env);
+        if (gamma > 0.0) {
+            glb.bEnvGammaValid = TRUE;
+            glb.fEnvGamma = (float)gamma;
+        }
+    }
+
+    env = getenv("SSTV2_SWAPINTERVAL");
+    if (!env || !*env)
+        env = getenv("GLDIRECT_SWAPINTERVAL");
+    if (env && *env) {
+        int interval = atoi(env);
+        if (interval < 0)
+            interval = 0;
+        glb.bSwapIntervalOverride = TRUE;
+        glb.uSwapInterval = (UINT)interval;
+        glb.bWaitForRetrace = (interval != 0);
+    }
+}
 
 // ***********************************************************************
 
@@ -229,8 +259,10 @@ BOOL dllReadRegistry(
 		glb.dwTnL			= ini.dwTnL;
 		glb.dwMultisample	= ini.dwMultisample;
         bValidINIFound = TRUE;
+        gldApplyEnvironmentOverrides();
 		return TRUE;
 	}
+        gldApplyEnvironmentOverrides();
 	return FALSE;
 #if 0
 	// Read settings from registry
