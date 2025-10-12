@@ -143,6 +143,10 @@ void gldInitGlobals()
 	glb.bUseMesaDisplayLists	= FALSE;
 
 	glb.iAppCustomisation			= -1; // Not yet detected
+    glb.bSwapIntervalOverride       = FALSE;
+    glb.uSwapInterval               = 1;
+    glb.bEnvGammaValid              = FALSE;
+    glb.fEnvGamma                   = 1.0f;
 }
 
 // ***********************************************************************

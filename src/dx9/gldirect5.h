@@ -399,6 +399,7 @@ typedef struct {
 	BOOL						bHasHWTnL;				// Device has Hardware Transform/Light?
 	IDirect3D9					*pD3D;					// Base Direct3D9 interface
 	IDirect3DDevice9			*pDev;					// Direct3D9 Device interface
+        D3DPRESENT_PARAMETERS           PresentParams;        // Cached presentation parameters for resets
 	D3DXMATRIX					matProjection;			// Projection matrix for D3D TnL
 	D3DXMATRIX					matModelView;			// Model/View matrix for D3D TnL
 	D3DXMATRIX					matInvModelView;		// Inverse Model/View matrix for D3D TnL
